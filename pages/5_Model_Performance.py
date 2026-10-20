@@ -30,13 +30,14 @@ high_thresh, med_thresh = render_sidebar_filters()
 st.title("📈 Model Performance & Evaluation")
 st.markdown("Rigorous benchmarking across Logistic Regression, Random Forest, and XGBoost on held-out test data (N = 1,409).")
 
-# Load saved metrics and cache
+# Load saved metrics and cache with auto-training fallback
 METRICS_PATH = MODELS_DIR / "evaluation_metrics.json"
 CACHE_PATH = MODELS_DIR / "test_evaluation_cache.joblib"
 
 if not METRICS_PATH.exists() or not CACHE_PATH.exists():
-    st.error("Model artifacts or evaluation cache not found. Please run `python -m src.train` to generate metrics.")
-    st.stop()
+    with st.spinner("Training models and generating held-out evaluation cache..."):
+        from src.train import train_and_evaluate_all_models
+        train_and_evaluate_all_models()
 
 with open(METRICS_PATH, "r") as f:
     eval_data = json.load(f)

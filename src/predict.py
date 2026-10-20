@@ -31,13 +31,30 @@ class ChurnPredictor:
         self._load_artifacts()
 
     def _load_artifacts(self):
-        """Loads model and preprocessing artifacts from disk."""
-        if not self.model_path.exists():
-            logger.warning(f"Champion model not found at {self.model_path}")
-            return
-        self.model = joblib.load(self.model_path)
-        self.preprocessor, self.feature_names = load_preprocessor()
-        logger.info(f"Loaded champion model and preprocessor ({len(self.feature_names) if self.feature_names else 0} features).")
+        """Loads model and preprocessing artifacts from disk with automatic training fallback."""
+        try:
+            if self.model_path.exists():
+                self.model = joblib.load(self.model_path)
+                self.preprocessor, self.feature_names = load_preprocessor()
+                if self.is_ready():
+                    logger.info(f"Loaded champion model and preprocessor ({len(self.feature_names)} features).")
+                    return
+        except Exception as e:
+            logger.warning(f"Could not load pre-existing artifacts: {e}")
+            self.model = None
+            self.preprocessor = None
+
+        # Self-healing fallback: train on the fly if missing or incompatible
+        logger.info("Initializing automated model training fallback...")
+        try:
+            from src.train import train_and_evaluate_all_models
+            train_and_evaluate_all_models()
+            if self.model_path.exists():
+                self.model = joblib.load(self.model_path)
+                self.preprocessor, self.feature_names = load_preprocessor()
+                logger.info(f"Auto-training completed successfully. Model loaded ({len(self.feature_names) if self.feature_names else 0} features).")
+        except Exception as err:
+            logger.error(f"Auto-training fallback failed: {err}")
 
     def is_ready(self) -> bool:
         """Returns True if model and preprocessor are loaded."""
@@ -57,7 +74,9 @@ class ChurnPredictor:
             - prediction_timestamp: ISO 8601 string
         """
         if not self.is_ready():
-            raise RuntimeError("ChurnPredictor artifacts are not loaded. Run `python -m src.train` first.")
+            self._load_artifacts()
+            if not self.is_ready():
+                raise RuntimeError("ChurnPredictor artifacts could not be initialized.")
 
         # 1. Validate
         is_valid, errors, warnings, cleaned_df = validate_raw_data(df, is_training=False)

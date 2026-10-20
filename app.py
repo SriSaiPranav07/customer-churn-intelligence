@@ -34,20 +34,26 @@ st.set_page_config(
 inject_custom_css()
 
 # 2. Data & Model Loading with Caching
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Loading customer data...")
 def load_app_data():
     df, meta = load_telco_data()
     metrics_path = MODELS_DIR / "evaluation_metrics.json"
     metrics = {}
+    if not metrics_path.exists():
+        from src.train import train_and_evaluate_all_models
+        train_and_evaluate_all_models()
     if metrics_path.exists():
         with open(metrics_path, "r") as f:
             metrics = json.load(f)
     return df, meta, metrics
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner="Initializing AI Model...")
 def load_app_predictor():
-    return get_predictor()
+    predictor = get_predictor()
+    if not predictor.is_ready():
+        predictor._load_artifacts()
+    return predictor
 
 
 df_raw, dataset_meta, eval_metrics = load_app_data()
