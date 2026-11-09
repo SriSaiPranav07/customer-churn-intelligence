@@ -23,27 +23,52 @@ high_thresh, med_thresh = render_sidebar_filters()
 st.title("📂 Batch Customer Upload & Live Prediction")
 st.markdown("Upload external customer CSV files for automated validation, batch churn scoring, and retention strategy generation.")
 
-# Download sample template
+# Download sample template & Quick Demo Loader
 sample_file_path = DATA_DIR / "sample_customers.csv"
-if sample_file_path.exists():
-    with open(sample_file_path, "rb") as f:
-        sample_bytes = f.read()
-    st.download_button(
-        label="📄 Download Sample CSV Template (100 Customers)",
-        data=sample_bytes,
-        file_name="sample_customers_template.csv",
-        mime="text/csv"
-    )
+col_t1, col_t2 = st.columns([1, 1])
+
+with col_t1:
+    if sample_file_path.exists():
+        with open(sample_file_path, "rb") as f:
+            sample_bytes = f.read()
+        st.download_button(
+            label="📄 Download Sample CSV Template (100 Customers)",
+            data=sample_bytes,
+            file_name="sample_customers_template.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+with col_t2:
+    if st.button("🚀 Load Demo Customer Data (100 Accounts)", use_container_width=True):
+        if sample_file_path.exists():
+            st.session_state["demo_df"] = pd.read_csv(sample_file_path)
+            st.session_state["demo_filename"] = "sample_customers.csv"
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # File uploader
 uploaded_file = st.file_uploader("Upload Customer CSV File", type=["csv"])
 
+raw_upload_df = None
+file_source_name = ""
+
 if uploaded_file is not None:
     try:
         raw_upload_df = pd.read_csv(uploaded_file)
-        st.success(f"File uploaded successfully! Detected **{len(raw_upload_df):,} rows** and **{len(raw_upload_df.columns)} columns**.")
+        file_source_name = uploaded_file.name
+        # Clear demo state when user explicitly uploads a file
+        st.session_state.pop("demo_df", None)
+    except Exception as e:
+        st.error(f"Error reading CSV file: {e}")
+elif "demo_df" in st.session_state and st.session_state["demo_df"] is not None:
+    raw_upload_df = st.session_state["demo_df"].copy()
+    file_source_name = st.session_state.get("demo_filename", "sample_customers.csv")
+    st.info("Loaded **Demo Sample Customer Data** (100 customer accounts). Ready for live scoring below.")
+
+if raw_upload_df is not None:
+    try:
+        st.success(f"File ready: **{file_source_name}** ({len(raw_upload_df):,} rows, {len(raw_upload_df.columns)} columns).")
 
         # Preview uploaded data
         with st.expander("👁️ Preview Raw Upload Data (Top 5 Rows)", expanded=False):
@@ -58,6 +83,20 @@ if uploaded_file is not None:
                     st.warning(w)
 
         if not is_valid:
+            # Check if user uploaded a prediction export file instead of raw customer features
+            is_prediction_file = any(c in raw_upload_df.columns for c in [
+                "churn_probability", "risk_category", "recommended_action", "expected_retention_value"
+            ])
+            if is_prediction_file or "batch_predictions" in file_source_name:
+                st.warning(
+                    f"💡 **Notice: '{file_source_name}' is an Exported Output File, Not Raw Input Data**\n\n"
+                    "This file contains **already-scored predictions and retention recommendations**, "
+                    "rather than the raw customer demographic and service attributes needed to generate new predictions.\n\n"
+                    "**How to test scoring:**\n"
+                    "1. Click the **'🚀 Load Demo Customer Data'** button above to test with 100 sample accounts instantly.\n"
+                    "2. Or click **'📄 Download Sample CSV Template'** to see the required raw feature columns."
+                )
+
             st.error("Validation Failed! Please resolve the following errors before running inference:")
             for err in errors:
                 st.error(f"• {err}")
@@ -113,7 +152,7 @@ if uploaded_file is not None:
             st.download_button(
                 label="⬇️ Download Full Prediction Results & Retention Actions (CSV)",
                 data=csv_out,
-                file_name=f"batch_predictions_{uploaded_file.name}",
+                file_name=f"batch_predictions_{file_source_name}",
                 mime="text/csv",
                 type="primary"
             )
