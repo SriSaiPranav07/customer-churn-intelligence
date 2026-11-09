@@ -1,4 +1,4 @@
-"""Evaluation metrics calculation and interactive Plotly visualization charts."""
+"""Evaluation metrics calculation, statistical uncertainty, fairness, and Plotly visualization charts."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, average_precision_score, confusion_matrix,
@@ -76,7 +77,7 @@ def find_optimal_threshold(
     for th in thresholds:
         metrics = compute_comprehensive_metrics(y_true, y_pred_proba, threshold=th)
         records.append({
-            "threshold": th,
+            "threshold": round(float(th), 3),
             "precision": metrics["precision"],
             "recall": metrics["recall"],
             "f1": metrics["f1"]
@@ -92,7 +93,229 @@ def find_optimal_threshold(
         best_thresh = records[best_idx]["threshold"]
         best_f1 = records[best_idx]["f1"]
 
-    return float(best_thresh), pd.DataFrame(records)
+    return float(round(best_thresh, 3)), pd.DataFrame(records)
+
+
+def compute_bootstrap_ci(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+    n_bootstraps: int = 1000,
+    ci: float = 0.95,
+    random_state: int = 42
+) -> Dict[str, Dict[str, float]]:
+    """
+    Computes non-parametric bootstrap confidence intervals for ROC-AUC and PR-AUC.
+    """
+    rng = np.random.default_rng(random_state)
+    n_samples = len(y_true)
+    roc_scores = []
+    pr_scores = []
+
+    alpha_low = ((1.0 - ci) / 2.0) * 100
+    alpha_high = (ci + (1.0 - ci) / 2.0) * 100
+
+    for _ in range(n_bootstraps):
+        idx = rng.integers(0, n_samples, n_samples)
+        sample_true = y_true[idx]
+        sample_proba = y_pred_proba[idx]
+        if len(np.unique(sample_true)) < 2:
+            continue
+        roc_scores.append(roc_auc_score(sample_true, sample_proba))
+        pr_scores.append(average_precision_score(sample_true, sample_proba))
+
+    return {
+        "roc_auc": {
+            "mean": round(float(np.mean(roc_scores)), 4),
+            "std": round(float(np.std(roc_scores)), 4),
+            "ci_lower": round(float(np.percentile(roc_scores, alpha_low)), 4),
+            "ci_upper": round(float(np.percentile(roc_scores, alpha_high)), 4),
+        },
+        "pr_auc": {
+            "mean": round(float(np.mean(pr_scores)), 4),
+            "std": round(float(np.std(pr_scores)), 4),
+            "ci_lower": round(float(np.percentile(pr_scores, alpha_low)), 4),
+            "ci_upper": round(float(np.percentile(pr_scores, alpha_high)), 4),
+        }
+    }
+
+
+def compute_reliability_curve_data(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+    n_bins: int = 10
+) -> Dict[str, Any]:
+    """Calculates calibration reliability curve points and Brier score."""
+    prob_true, prob_pred = calibration_curve(y_true, y_pred_proba, n_bins=n_bins, strategy="uniform")
+    brier = float(brier_score_loss(y_true, y_pred_proba))
+    return {
+        "prob_pred": [round(float(p), 4) for p in prob_pred],
+        "prob_true": [round(float(p), 4) for p in prob_true],
+        "brier_score": round(brier, 4)
+    }
+
+
+def compute_fairness_analysis(
+    df_eval: pd.DataFrame,
+    y_true_col: str = "Churn_num",
+    proba_col: str = "churn_probability",
+    sensitive_cols: List[str] = ("gender", "SeniorCitizen"),
+    threshold: float = 0.5
+) -> Dict[str, Any]:
+    """Computes subgroup classification metrics across demographic attributes."""
+    fairness_results = {}
+    y_pred = (df_eval[proba_col] >= threshold).astype(int)
+    y_true = df_eval[y_true_col].astype(int)
+
+    for col in sensitive_cols:
+        if col not in df_eval.columns:
+            continue
+        group_metrics = {}
+        for group_val, grp_df in df_eval.groupby(col):
+            grp_true = grp_df[y_true_col].astype(int).values
+            grp_proba = grp_df[proba_col].values
+            grp_pred = (grp_proba >= threshold).astype(int)
+
+            if len(np.unique(grp_true)) > 1:
+                auc = float(roc_auc_score(grp_true, grp_proba))
+            else:
+                auc = 0.5
+
+            group_metrics[str(group_val)] = {
+                "count": int(len(grp_df)),
+                "churn_rate": round(float(np.mean(grp_true)), 4),
+                "selection_rate": round(float(np.mean(grp_pred)), 4),
+                "precision": round(float(precision_score(grp_true, grp_pred, zero_division=0)), 4),
+                "recall": round(float(recall_score(grp_true, grp_pred, zero_division=0)), 4),
+                "f1": round(float(f1_score(grp_true, grp_pred, zero_division=0)), 4),
+                "roc_auc": round(auc, 4)
+            }
+        fairness_results[col] = group_metrics
+
+    return fairness_results
+
+
+def compute_profit_curve_data(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+    annual_revenue: float = 600.0,
+    intervention_cost: float = 25.0,
+    acceptance_rate: float = 0.40
+) -> Tuple[float, float, pd.DataFrame]:
+    """
+    Computes net retention profit across decision thresholds:
+    Expected Profit = TP * acceptance_rate * annual_revenue - (TP + FP) * intervention_cost.
+    """
+    thresholds = np.linspace(0.05, 0.95, 91)
+    records = []
+    best_profit = -float("inf")
+    best_thresh = 0.5
+
+    for th in thresholds:
+        y_pred = (y_pred_proba >= th).astype(int)
+        tp = np.sum((y_pred == 1) & (y_true == 1))
+        fp = np.sum((y_pred == 1) & (y_true == 0))
+        flagged = tp + fp
+
+        gain = tp * acceptance_rate * annual_revenue
+        cost = flagged * intervention_cost
+        net_profit = gain - cost
+
+        records.append({
+            "threshold": round(float(th), 3),
+            "flagged": int(flagged),
+            "tp": int(tp),
+            "fp": int(fp),
+            "cost": round(float(cost), 2),
+            "gain": round(float(gain), 2),
+            "net_profit": round(float(net_profit), 2)
+        })
+
+        if net_profit > best_profit:
+            best_profit = net_profit
+            best_thresh = th
+
+    df_profit = pd.DataFrame(records)
+    return float(round(best_thresh, 3)), float(round(best_profit, 2)), df_profit
+
+
+def plot_profit_curve(
+    profit_df: pd.DataFrame,
+    optimal_thresh: float,
+    title: str = "Threshold Profit Optimization Curve"
+) -> go.Figure:
+    """Generates an interactive Plotly profit curve showing optimal threshold."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=profit_df["threshold"],
+        y=profit_df["net_profit"],
+        mode="lines",
+        line=dict(color="#2563EB", width=3),
+        name="Net Retention Profit ($)"
+    ))
+
+    # Mark optimal threshold
+    best_row = profit_df[profit_df["threshold"] == optimal_thresh]
+    if not best_row.empty:
+        max_profit = best_row["net_profit"].values[0]
+        fig.add_trace(go.Scatter(
+            x=[optimal_thresh],
+            y=[max_profit],
+            mode="markers+text",
+            marker=dict(color="#EF4444", size=11),
+            text=[f"Optimal: {optimal_thresh:.2f} (${max_profit:,.0f})"],
+            textposition="top center",
+            name="Max Profit Cutoff"
+        ))
+
+    # Zero profit benchmark line
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Break-even ($0)")
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="Classification Threshold",
+        yaxis_title="Estimated Net Profit ($)",
+        template="plotly_white",
+        hovermode="x unified",
+        margin=dict(t=35, b=25, l=10, r=10)
+    )
+    return fig
+
+
+def plot_reliability_curve(
+    reliability_dict: Dict[str, Dict[str, Any]],
+    title: str = "Probability Calibration Reliability Curves"
+) -> go.Figure:
+    """Renders Plotly calibration curve comparing uncalibrated vs calibrated probabilities."""
+    fig = go.Figure()
+
+    for name, data in reliability_dict.items():
+        brier = data.get("brier_score", 0.0)
+        fig.add_trace(go.Scatter(
+            x=data["prob_pred"],
+            y=data["prob_true"],
+            mode="lines+markers",
+            name=f"{name} (Brier: {brier:.4f})",
+            line=dict(width=2.5)
+        ))
+
+    # Perfectly calibrated 45-degree diagonal
+    fig.add_trace(go.Scatter(
+        x=[0, 1], y=[0, 1],
+        mode="lines",
+        name="Perfect Calibration",
+        line=dict(dash="dash", color="gray", width=1.5)
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="Mean Predicted Probability",
+        yaxis_title="Fraction of Positives (Empirical Churn)",
+        template="plotly_white",
+        hovermode="x unified",
+        legend=dict(x=0.55, y=0.15, bgcolor="rgba(255,255,255,0.8)"),
+        margin=dict(t=35, b=25, l=10, r=10)
+    )
+    return fig
 
 
 def plot_roc_curve(models_dict: Dict[str, Dict[str, Any]]) -> go.Figure:

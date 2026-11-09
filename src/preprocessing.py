@@ -5,9 +5,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from typing import Tuple, List, Optional
 import joblib
-import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from src.feature_engineering import NUMERICAL_FEATURES, CATEGORICAL_FEATURES
@@ -31,6 +31,18 @@ def build_preprocessor(
     return preprocessor
 
 
+def build_pipeline(
+    classifier,
+    num_features: List[str] = NUMERICAL_FEATURES,
+    cat_features: List[str] = CATEGORICAL_FEATURES
+) -> Pipeline:
+    """Creates a unified Scikit-Learn Pipeline combining preprocessing and classifier."""
+    return Pipeline([
+        ("preprocessor", build_preprocessor(num_features=num_features, cat_features=cat_features)),
+        ("classifier", classifier)
+    ])
+
+
 def get_feature_names(preprocessor: ColumnTransformer) -> List[str]:
     """Extracts human-readable feature names from the fitted preprocessor."""
     feature_names = []
@@ -49,7 +61,7 @@ def fit_and_save_preprocessor(
     X_train: pd.DataFrame,
     target_path: Path = PREPROCESSOR_PATH
 ) -> Tuple[ColumnTransformer, List[str]]:
-    """Fits preprocessor on training data and serializes to disk."""
+    """Fits preprocessor strictly on training data and serializes to disk."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
     preprocessor = build_preprocessor()
     preprocessor.fit(X_train)
@@ -67,7 +79,15 @@ def load_preprocessor(target_path: Path = PREPROCESSOR_PATH) -> Tuple[Optional[C
         return None, None
     try:
         data = joblib.load(target_path)
-        return data["preprocessor"], data["feature_names"]
+        if isinstance(data, dict) and "preprocessor" in data:
+            return data["preprocessor"], data.get("feature_names")
+        elif isinstance(data, Pipeline):
+            pre = data.named_steps.get("preprocessor")
+            names = get_feature_names(pre) if pre else None
+            return pre, names
+        elif isinstance(data, ColumnTransformer):
+            return data, get_feature_names(data)
+        return None, None
     except Exception as e:
         logger.error(f"Error loading preprocessor: {e}")
         return None, None

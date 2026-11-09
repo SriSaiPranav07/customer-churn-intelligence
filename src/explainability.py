@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import shap
+from sklearn.pipeline import Pipeline
 
 from src.feature_engineering import prepare_features_and_target
 from src.predict import get_predictor
@@ -55,13 +56,22 @@ class ChurnSHAPExplainer:
         self.explainer = None
         self._init_explainer()
 
+    def _extract_tree_estimator(self, model):
+        """Extracts underlying tree estimator from Pipeline or CalibratedClassifierCV."""
+        if isinstance(model, Pipeline):
+            model = model.named_steps.get("classifier", model)
+        if hasattr(model, "calibrated_classifiers_") and model.calibrated_classifiers_:
+            model = model.calibrated_classifiers_[0].estimator
+        return model
+
     def _init_explainer(self):
         """Initializes TreeExplainer for the champion model."""
         if not self.predictor.is_ready():
             logger.warning("Predictor not ready for SHAP initialization.")
             return
         try:
-            self.explainer = shap.TreeExplainer(self.predictor.model)
+            tree_model = self._extract_tree_estimator(self.predictor.model)
+            self.explainer = shap.TreeExplainer(tree_model)
             logger.info("SHAP TreeExplainer initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize TreeExplainer: {e}")
@@ -83,12 +93,16 @@ class ChurnSHAPExplainer:
         # Convert row to DataFrame
         df_single = pd.DataFrame([customer_row])
         X, _, _ = prepare_features_and_target(df_single)
-        X_proc = self.predictor.preprocessor.transform(X)
+
+        # Preprocess features
+        preprocessor = self.predictor.preprocessor
+        if preprocessor is None and isinstance(self.predictor.model, Pipeline):
+            preprocessor = self.predictor.model.named_steps.get("preprocessor")
+        X_proc = preprocessor.transform(X)
 
         raw_shap = self.explainer.shap_values(X_proc)
 
-        # For binary classifiers in Random Forest, shap_values can be a list [class 0, class 1]
-        # or a 3D numpy array (samples, features, classes)
+        # Standardize shap output across scikit-learn and SHAP formats
         if isinstance(raw_shap, list) and len(raw_shap) == 2:
             shap_vec = raw_shap[1][0]  # Positive class (Churn)
         elif isinstance(raw_shap, np.ndarray) and raw_shap.ndim == 3:
@@ -118,7 +132,6 @@ class ChurnSHAPExplainer:
 
         # Protective factors reducing churn risk (negative SHAP)
         protective_factors = df_shap[df_shap["shap_value"] < -0.001].tail(4).to_dict(orient="records")
-        # Reverse to show most protective first
         protective_factors.reverse()
 
         # Build plain-English narrative
@@ -142,7 +155,6 @@ class ChurnSHAPExplainer:
         tenure = customer_row.get("tenure", "N/A")
         contract = customer_row.get("Contract", "N/A")
         monthly = customer_row.get("MonthlyCharges", "N/A")
-        internet = customer_row.get("InternetService", "N/A")
 
         parts = []
         parts.append(f"Customer has been active for **{tenure} months** on a **{contract}** plan with monthly charges of **${monthly}**.")
@@ -168,7 +180,10 @@ class ChurnSHAPExplainer:
 
         sample = df_sample.head(n_samples)
         X, _, _ = prepare_features_and_target(sample)
-        X_proc = self.predictor.preprocessor.transform(X)
+        preprocessor = self.predictor.preprocessor
+        if preprocessor is None and isinstance(self.predictor.model, Pipeline):
+            preprocessor = self.predictor.model.named_steps.get("preprocessor")
+        X_proc = preprocessor.transform(X)
 
         raw_shap = self.explainer.shap_values(X_proc)
 
@@ -201,7 +216,6 @@ def plot_customer_shap_waterfall(explanation: Dict[str, Any], title: str = "Key 
 
     df = pd.DataFrame(combined)
     df["color"] = df["shap_value"].apply(lambda v: COLOR_HIGH_RISK if v > 0 else COLOR_LOW_RISK)
-    df["direction"] = df["shap_value"].apply(lambda v: "Increases Risk" if v > 0 else "Reduces Risk")
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
