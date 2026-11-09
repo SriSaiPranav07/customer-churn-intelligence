@@ -76,6 +76,26 @@ def validate_raw_data(df: pd.DataFrame, is_training: bool = True) -> Tuple[bool,
 
     cleaned_df = df.copy()
 
+    # Default fallback values for optional inference features
+    inference_defaults = {
+        "gender": "Female",
+        "SeniorCitizen": 0,
+        "Partner": "No",
+        "Dependents": "No",
+        "PhoneService": "Yes",
+        "MultipleLines": "No",
+        "InternetService": "DSL",
+        "OnlineSecurity": "No",
+        "OnlineBackup": "No",
+        "DeviceProtection": "No",
+        "TechSupport": "No",
+        "StreamingTV": "No",
+        "StreamingMovies": "No",
+        "Contract": "Month-to-month",
+        "PaperlessBilling": "Yes",
+        "PaymentMethod": "Electronic check",
+    }
+
     # 1. Check required columns
     required_cols = list(EXPECTED_RAW_COLUMNS)
     if is_training:
@@ -88,6 +108,22 @@ def validate_raw_data(df: pd.DataFrame, is_training: bool = True) -> Tuple[bool,
             warnings.append("Missing 'customerID' column. Generated synthetic identifiers.")
             cleaned_df["customerID"] = [f"CUST-{i:05d}" for i in range(len(cleaned_df))]
             missing_cols.remove("customerID")
+
+        # If evaluating for inference, auto-impute non-essential missing features
+        if not is_training and missing_cols:
+            auto_imputed = []
+            for col in list(missing_cols):
+                if col in inference_defaults:
+                    cleaned_df[col] = inference_defaults[col]
+                    missing_cols.remove(col)
+                    auto_imputed.append(col)
+                elif col == "TotalCharges" and "tenure" in cleaned_df.columns and "MonthlyCharges" in cleaned_df.columns:
+                    cleaned_df["TotalCharges"] = cleaned_df["tenure"] * cleaned_df["MonthlyCharges"]
+                    missing_cols.remove(col)
+                    auto_imputed.append(col)
+
+            if auto_imputed:
+                warnings.append(f"Auto-imputed default values for missing feature columns: {', '.join(auto_imputed)}")
 
         if missing_cols:
             errors.append(f"Missing required columns: {', '.join(missing_cols)}")

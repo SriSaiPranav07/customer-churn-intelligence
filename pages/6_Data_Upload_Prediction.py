@@ -74,48 +74,26 @@ if raw_upload_df is not None:
         with st.expander("👁️ Preview Raw Upload Data (Top 5 Rows)", expanded=False):
             st.dataframe(raw_upload_df.head(5), use_container_width=True)
 
-        # Validation
-        is_valid, errors, warnings, cleaned_df = validate_uploaded_csv(raw_upload_df)
+        is_pre_scored = "churn_probability" in raw_upload_df.columns
 
-        if warnings:
-            with st.expander("⚠️ Data Processing Warnings", expanded=True):
-                for w in warnings:
-                    st.warning(w)
+        if is_pre_scored:
+            st.info("ℹ️ **Pre-Scored Batch Dataset Detected:** This file already contains churn risk probabilities (`churn_probability`). Analyzing portfolio risk and generating retention recommendations:")
 
-        if not is_valid:
-            # Check if user uploaded a prediction export file instead of raw customer features
-            is_prediction_file = any(c in raw_upload_df.columns for c in [
-                "churn_probability", "risk_category", "recommended_action", "expected_retention_value"
-            ])
-            if is_prediction_file or "batch_predictions" in file_source_name:
-                st.warning(
-                    f"💡 **Notice: '{file_source_name}' is an Exported Output File, Not Raw Input Data**\n\n"
-                    "This file contains **already-scored predictions and retention recommendations**, "
-                    "rather than the raw customer demographic and service attributes needed to generate new predictions.\n\n"
-                    "**How to test scoring:**\n"
-                    "1. Click the **'🚀 Load Demo Customer Data'** button above to test with 100 sample accounts instantly.\n"
-                    "2. Or click **'📄 Download Sample CSV Template'** to see the required raw feature columns."
-                )
+            scored_df = raw_upload_df.copy()
+            # Dynamically categorize using active sidebar threshold sliders
+            scored_df["risk_category"] = [
+                "High Risk" if p >= high_thresh else ("Medium Risk" if p >= med_thresh else "Low Risk")
+                for p in scored_df["churn_probability"]
+            ]
 
-            st.error("Validation Failed! Please resolve the following errors before running inference:")
-            for err in errors:
-                st.error(f"• {err}")
-            st.stop()
+            # If retention recommendations are not present, generate them
+            if "expected_retention_value" not in scored_df.columns or "primary_strategy" not in scored_df.columns:
+                with st.spinner("Generating retention strategy recommendations..."):
+                    recs_df = generate_batch_recommendations(scored_df)
+            else:
+                recs_df = scored_df
 
-        # Run Prediction
-        st.markdown("---")
-        if st.button("⚡ Run Live Churn Scoring & Retention Recommender", type="primary", use_container_width=True):
-            with st.spinner("Executing feature engineering and model inference..."):
-                predictor = get_predictor()
-                if not predictor.is_ready():
-                    st.error("⚠️ **Model artifacts are not loaded.** Please run `python -m src.train` to generate production model artifacts.")
-                    st.stop()
-                scored_df = predictor.predict(cleaned_df, high_threshold=high_thresh, med_threshold=med_thresh)
-                recs_df = generate_batch_recommendations(scored_df)
-
-            st.success(f"Batch prediction completed for **{len(scored_df):,} customer accounts**!")
-
-            # Summary metrics of the uploaded batch
+            # Summary metrics of the pre-scored batch
             high_count = (scored_df["risk_category"] == "High Risk").sum()
             med_count = (scored_df["risk_category"] == "Medium Risk").sum()
             low_count = (scored_df["risk_category"] == "Low Risk").sum()
@@ -132,30 +110,115 @@ if raw_upload_df is not None:
                 st.metric("Avg Predicted Risk", f"{avg_p*100:.1f}%")
 
             # Result Table View
-            st.markdown("### 📋 Prediction Results & Recommended Actions")
+            st.markdown("### 📋 Portfolio Risk & Retention Action Plan")
             view_cols = [
-                "customerID", "risk_category", "churn_probability", "priority",
-                "primary_strategy", "primary_action", "expected_retention_value",
-                "estimated_cost", "revenue_protected", "Contract", "MonthlyCharges", "tenure"
+                c for c in [
+                    "customerID", "risk_category", "churn_probability", "priority",
+                    "primary_strategy", "primary_action", "expected_retention_value",
+                    "estimated_cost", "revenue_protected", "Contract", "MonthlyCharges", "tenure"
+                ] if c in recs_df.columns
             ]
+            if not view_cols:
+                view_cols = recs_df.columns.tolist()
+
             display_res = recs_df[view_cols].copy()
-            display_res["churn_probability"] = display_res["churn_probability"].apply(lambda p: f"{p*100:.1f}%")
-            display_res["expected_retention_value"] = display_res["expected_retention_value"].apply(format_currency)
-            display_res["estimated_cost"] = display_res["estimated_cost"].apply(format_currency)
-            display_res["revenue_protected"] = display_res["revenue_protected"].apply(format_currency)
-            display_res["MonthlyCharges"] = display_res["MonthlyCharges"].apply(format_currency)
+            if "churn_probability" in display_res.columns:
+                display_res["churn_probability"] = display_res["churn_probability"].apply(lambda p: f"{float(p)*100:.1f}%")
+            if "expected_retention_value" in display_res.columns:
+                display_res["expected_retention_value"] = display_res["expected_retention_value"].apply(lambda v: format_currency(float(v)) if pd.notna(v) else "$0.00")
+            if "estimated_cost" in display_res.columns:
+                display_res["estimated_cost"] = display_res["estimated_cost"].apply(lambda v: format_currency(float(v)) if pd.notna(v) else "$0.00")
+            if "revenue_protected" in display_res.columns:
+                display_res["revenue_protected"] = display_res["revenue_protected"].apply(lambda v: format_currency(float(v)) if pd.notna(v) else "$0.00")
+            if "MonthlyCharges" in display_res.columns:
+                display_res["MonthlyCharges"] = display_res["MonthlyCharges"].apply(lambda v: format_currency(float(v)) if pd.notna(v) else "$0.00")
 
             st.dataframe(display_res, use_container_width=True, height=450, hide_index=True)
 
             # Export Button
             csv_out = recs_df.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="⬇️ Download Full Prediction Results & Retention Actions (CSV)",
+                label="⬇️ Export Portfolio Risk & Retention Actions (CSV)",
                 data=csv_out,
-                file_name=f"batch_predictions_{file_source_name}",
+                file_name=f"updated_{file_source_name}",
                 mime="text/csv",
                 type="primary"
             )
+
+        else:
+            # Validation for raw un-scored customer records
+            is_valid, errors, warnings, cleaned_df = validate_uploaded_csv(raw_upload_df)
+
+            if warnings:
+                with st.expander("⚠️ Data Processing Warnings", expanded=True):
+                    for w in warnings:
+                        st.warning(w)
+
+            if not is_valid:
+                st.error("Validation Failed! Please resolve the following errors before running inference:")
+                for err in errors:
+                    st.error(f"• {err}")
+                st.stop()
+
+            # Run Prediction
+            st.markdown("---")
+            if st.button("⚡ Run Live Churn Scoring & Retention Recommender", type="primary", use_container_width=True):
+                with st.spinner("Executing feature engineering and model inference..."):
+                    predictor = get_predictor()
+                    if not predictor.is_ready():
+                        st.error("⚠️ **Model artifacts are not loaded.** Please run `python -m src.train` to generate production model artifacts.")
+                        st.stop()
+                    scored_df = predictor.predict(cleaned_df, high_threshold=high_thresh, med_threshold=med_thresh)
+                    recs_df = generate_batch_recommendations(scored_df)
+
+                st.success(f"Batch prediction completed for **{len(scored_df):,} customer accounts**!")
+
+                # Summary metrics of the uploaded batch
+                high_count = (scored_df["risk_category"] == "High Risk").sum()
+                med_count = (scored_df["risk_category"] == "Medium Risk").sum()
+                low_count = (scored_df["risk_category"] == "Low Risk").sum()
+                avg_p = float(scored_df["churn_probability"].mean())
+
+                b1, b2, b3, b4 = st.columns(4)
+                with b1:
+                    st.metric("Total Accounts", f"{len(scored_df):,}")
+                with b2:
+                    st.metric("High Risk Accounts", f"{high_count:,}", f"{high_count/len(scored_df)*100:.1f}%")
+                with b3:
+                    st.metric("Medium Risk Accounts", f"{med_count:,}", f"{med_count/len(scored_df)*100:.1f}%")
+                with b4:
+                    st.metric("Avg Predicted Risk", f"{avg_p*100:.1f}%")
+
+                # Result Table View
+                st.markdown("### 📋 Prediction Results & Recommended Actions")
+                view_cols = [
+                    c for c in [
+                        "customerID", "risk_category", "churn_probability", "priority",
+                        "primary_strategy", "primary_action", "expected_retention_value",
+                        "estimated_cost", "revenue_protected", "Contract", "MonthlyCharges", "tenure"
+                    ] if c in recs_df.columns
+                ]
+                if not view_cols:
+                    view_cols = recs_df.columns.tolist()
+
+                display_res = recs_df[view_cols].copy()
+                display_res["churn_probability"] = display_res["churn_probability"].apply(lambda p: f"{p*100:.1f}%")
+                display_res["expected_retention_value"] = display_res["expected_retention_value"].apply(format_currency)
+                display_res["estimated_cost"] = display_res["estimated_cost"].apply(format_currency)
+                display_res["revenue_protected"] = display_res["revenue_protected"].apply(format_currency)
+                display_res["MonthlyCharges"] = display_res["MonthlyCharges"].apply(format_currency)
+
+                st.dataframe(display_res, use_container_width=True, height=450, hide_index=True)
+
+                # Export Button
+                csv_out = recs_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇️ Download Full Prediction Results & Retention Actions (CSV)",
+                    data=csv_out,
+                    file_name=f"batch_predictions_{file_source_name}",
+                    mime="text/csv",
+                    type="primary"
+                )
 
     except Exception as e:
         st.error(f"Error parsing CSV file: {e}")
