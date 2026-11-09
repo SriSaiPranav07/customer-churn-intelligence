@@ -1,16 +1,22 @@
-"""Intelligent Retention Action Recommendation Engine (Mentor Challenge).
+"""Intelligent Retention Action Recommendation Engine.
 
 Maps customer churn risk, feature profiles, and SHAP drivers to targeted,
-cost-effective business retention strategies with action tracking.
+cost-effective business retention strategies with expected value and ROI modeling.
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
 
-from src.utils import logger, ACTION_STATUS_OPTIONS
+from src.utils import (
+    DEFAULT_ACCEPTANCE_RATE,
+    DEFAULT_ANNUAL_REVENUE_BASIS,
+    compute_expected_retention_value,
+)
 
 RETENTION_DISCLAIMER = (
     "Decision-Support Notice: Recommended retention actions are data-driven suggestions "
@@ -34,11 +40,15 @@ def determine_recommendation_priority(prob: float) -> str:
 def generate_customer_recommendation(
     customer_row: pd.Series,
     churn_probability: float,
-    shap_risk_drivers: Optional[List[Dict[str, Any]]] = None
+    shap_risk_drivers: Optional[List[Dict[str, Any]]] = None,
+    acceptance_rate: float = DEFAULT_ACCEPTANCE_RATE,
+    annual_revenue_basis: Optional[float] = None,
+    cost_override: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Evaluates customer profile and SHAP risk drivers to generate tailored retention actions.
     Ensures discounts are only recommended when financially justified, avoiding blanket giveaways.
+    Computes Expected Value (EV) = P(churn) * acceptance_rate * annual_revenue - cost.
     """
     tenure = float(customer_row.get("tenure", 0))
     monthly_charges = float(customer_row.get("MonthlyCharges", 0.0))
@@ -47,7 +57,9 @@ def generate_customer_recommendation(
     internet_service = str(customer_row.get("InternetService", ""))
     tech_support = str(customer_row.get("TechSupport", "No"))
     online_security = str(customer_row.get("OnlineSecurity", "No"))
-    paperless = str(customer_row.get("PaperlessBilling", "No"))
+
+    # Revenue basis: use annual customer charges if available, else default basis
+    customer_annual_revenue = annual_revenue_basis or (monthly_charges * 12 if monthly_charges > 0 else DEFAULT_ANNUAL_REVENUE_BASIS)
 
     priority = determine_recommendation_priority(churn_probability)
     drivers_str = ""
@@ -60,74 +72,89 @@ def generate_customer_recommendation(
     # Rule 1: High Monthly Cost & Price Sensitivity
     if (monthly_charges > 70.0) or ("monthly charges" in drivers_str) or ("cost per service" in drivers_str):
         if tenure > 12:
+            cost = cost_override if cost_override is not None else 15.00
             candidates.append({
                 "strategy": "Tier Optimization & Loyalty Plan",
                 "action": "Offer a personalized plan review to right-size unused features, or enroll in a 10% loyalty rate on current tier.",
-                "rationale": f"Customer pays above-average monthly charges (${monthly_charges:.2f}/mo) and has proven tenure ({tenure} mos). Right-sizing prevents price-shock churn.",
-                "estimated_cost": 15.00,
+                "rationale": f"Customer pays above-average monthly charges (${monthly_charges:.2f}/mo) and has proven tenure ({tenure:.0f} mos). Right-sizing prevents price-shock churn.",
+                "estimated_cost": cost,
                 "revenue_protected": round(monthly_charges * 12 * 0.85, 2)
             })
         else:
+            cost = cost_override if cost_override is not None else 20.00
             candidates.append({
                 "strategy": "Value Realization & Feature Audit",
                 "action": "Schedule a customer success onboarding session to demonstrate premium feature value and optimize active features.",
-                "rationale": f"High charges (${monthly_charges:.2f}/mo) in early customer lifecycle ({tenure} mos) suggests risk of perceived low value-for-money without discounting.",
-                "estimated_cost": 20.00,
+                "rationale": f"High charges (${monthly_charges:.2f}/mo) in early customer lifecycle ({tenure:.0f} mos) suggests risk of perceived low value-for-money without discounting.",
+                "estimated_cost": cost,
                 "revenue_protected": round(monthly_charges * 12 * 0.70, 2)
             })
 
     # Rule 2: Month-to-Month Contract Vulnerability
     if contract == "Month-to-month" or ("month-to-month" in drivers_str) or ("contract" in drivers_str):
+        cost = cost_override if cost_override is not None else 25.00
         candidates.append({
             "strategy": "Contract Modernization Incentive",
             "action": "Invite customer to upgrade to a 1-year contract with a complimentary premium add-on (e.g. streaming perk or $5/month bill credit).",
             "rationale": "Month-to-month contracts lack switching barriers and exhibit 4x higher churn baseline. A 1-year commitment locks in annual recurring revenue.",
-            "estimated_cost": 25.00,
+            "estimated_cost": cost,
             "revenue_protected": round(monthly_charges * 12 * 0.80, 2)
         })
 
     # Rule 3: Electronic Check & Billing Friction
     if ("electronic check" in payment_method.lower()) or ("electronic check" in drivers_str):
+        cost = cost_override if cost_override is not None else 10.00
         candidates.append({
             "strategy": "AutoPay Transition & Billing Streamlining",
             "action": "Send guided invite to switch payment to Automated Bank Transfer or Credit Card with a one-time $10 statement credit.",
             "rationale": "Electronic check payments have the highest operational failure and manual friction rates in the telecom industry, directly triggering churn.",
-            "estimated_cost": 10.00,
+            "estimated_cost": cost,
             "revenue_protected": round(monthly_charges * 6, 2)
         })
 
     # Rule 4: Fiber Optic Stability without Technical Protection
     if (internet_service == "Fiber optic") and (tech_support != "Yes" or online_security != "Yes"):
+        cost = cost_override if cost_override is not None else 15.00
         candidates.append({
             "strategy": "VIP Technical Care Package",
             "action": "Provide 3 months of complimentary Tech Support and security diagnostic to resolve bandwidth or installation friction.",
             "rationale": "Fiber optic customers experience high churn when experiencing technical or speed inconsistencies without dedicated technical support.",
-            "estimated_cost": 15.00,
+            "estimated_cost": cost,
             "revenue_protected": round(monthly_charges * 12 * 0.75, 2)
         })
 
     # Rule 5: New Customer Early Lifecycle Stabilization
     if tenure <= 6:
+        cost = cost_override if cost_override is not None else 12.00
         candidates.append({
             "strategy": "Early Lifecycle Proactive Check-In",
-            "action": "Trigger automated VIP welcome call from customer care specialist to resolve early friction or unanswered service questions.",
-            "rationale": f"Customer is in the critical first {tenure} months where early cancellation probability peaks due to unaddressed onboarding questions.",
-            "estimated_cost": 12.00,
+            "action": "Trigger automated welcome check-in from customer care specialist to resolve early onboarding questions.",
+            "rationale": f"Customer is in the critical first {tenure:.0f} months where early cancellation probability peaks due to unaddressed questions.",
+            "estimated_cost": cost,
             "revenue_protected": round(monthly_charges * 12 * 0.65, 2)
         })
 
     # Fallback Rule: General Customer Appreciation & Health Check
     if not candidates:
+        cost = cost_override if cost_override is not None else 5.00
         candidates.append({
             "strategy": "Account Health Check & Appreciation",
             "action": "Send relationship check-in email thanking them for their loyalty with a self-service account optimization guide.",
             "rationale": "Maintains positive customer engagement and proactively surveys sentiment before latent dissatisfaction emerges.",
-            "estimated_cost": 5.00,
+            "estimated_cost": cost,
             "revenue_protected": round(monthly_charges * 6 * 0.50, 2)
         })
 
     primary = candidates[0]
     secondary = candidates[1] if len(candidates) > 1 else None
+
+    # Compute expected value of intervention: EV = P(churn) * acceptance_rate * annual_revenue - cost
+    ev = compute_expected_retention_value(
+        churn_probability=churn_probability,
+        acceptance_rate=acceptance_rate,
+        annual_revenue=customer_annual_revenue,
+        intervention_cost=primary["estimated_cost"]
+    )
 
     return {
         "customerID": str(customer_row.get("customerID", "UNKNOWN")),
@@ -138,6 +165,8 @@ def generate_customer_recommendation(
         "rationale": primary["rationale"],
         "estimated_cost": primary["estimated_cost"],
         "revenue_protected": primary["revenue_protected"],
+        "acceptance_rate": acceptance_rate,
+        "expected_retention_value": ev,
         "secondary_strategy": secondary["strategy"] if secondary else "None",
         "secondary_action": secondary["action"] if secondary else "None",
         "action_status": "Planned",
@@ -147,7 +176,10 @@ def generate_customer_recommendation(
 
 def generate_batch_recommendations(
     predicted_df: pd.DataFrame,
-    shap_explainer=None
+    shap_explainer=None,
+    acceptance_rate: float = DEFAULT_ACCEPTANCE_RATE,
+    annual_revenue_basis: Optional[float] = None,
+    cost_override: Optional[float] = None
 ) -> pd.DataFrame:
     """
     Generates intelligent retention recommendations for all rows in a predicted customer DataFrame.
@@ -165,8 +197,13 @@ def generate_batch_recommendations(
             except Exception:
                 shap_drivers = None
 
-        rec = generate_customer_recommendation(row, prob, shap_drivers)
-        # Add basic customer profile context
+        rec = generate_customer_recommendation(
+            row, prob,
+            shap_risk_drivers=shap_drivers,
+            acceptance_rate=acceptance_rate,
+            annual_revenue_basis=annual_revenue_basis,
+            cost_override=cost_override
+        )
         rec["tenure"] = int(row.get("tenure", 0))
         rec["MonthlyCharges"] = float(row.get("MonthlyCharges", 0.0))
         rec["Contract"] = str(row.get("Contract", "Month-to-month"))

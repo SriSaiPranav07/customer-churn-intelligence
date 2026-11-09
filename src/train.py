@@ -3,9 +3,11 @@ import json
 import platform
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Dict, Any, Tuple
+from typing import Any, Dict
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -13,8 +15,13 @@ import sklearn
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_validate, RandomizedSearchCV, train_test_split
-from sklearn.pipeline import Pipeline
+from sklearn.model_selection import (
+    RandomizedSearchCV,
+    StratifiedKFold,
+    cross_val_predict,
+    cross_validate,
+    train_test_split,
+)
 
 try:
     import xgboost
@@ -31,17 +38,17 @@ except ImportError:
 
 from src.data_loader import load_telco_data
 from src.data_validation import validate_raw_data
-from src.feature_engineering import prepare_features_and_target, NUMERICAL_FEATURES, CATEGORICAL_FEATURES
-from src.preprocessing import build_pipeline, build_preprocessor, fit_and_save_preprocessor, get_feature_names
 from src.evaluation import (
-    compute_comprehensive_metrics,
-    find_optimal_threshold,
     compute_bootstrap_ci,
-    compute_reliability_curve_data,
+    compute_comprehensive_metrics,
     compute_fairness_analysis,
-    compute_profit_curve_data
+    compute_profit_curve_data,
+    compute_reliability_curve_data,
+    find_optimal_threshold,
 )
-from src.utils import MODELS_DIR, logger, RISK_THRESHOLD_HIGH, RISK_THRESHOLD_MEDIUM
+from src.feature_engineering import CATEGORICAL_FEATURES, NUMERICAL_FEATURES, prepare_features_and_target
+from src.preprocessing import build_pipeline, fit_and_save_preprocessor
+from src.utils import MODELS_DIR, RISK_THRESHOLD_HIGH, RISK_THRESHOLD_MEDIUM, logger
 
 METRICS_FILE = MODELS_DIR / "evaluation_metrics.json"
 CACHE_FILE = MODELS_DIR / "test_evaluation_cache.joblib"

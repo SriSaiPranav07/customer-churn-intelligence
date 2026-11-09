@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "customer-churn-intelligence"
+version = "2.0.0"
+description = "Customer Churn Prediction & Intelligent Retention Recommendation System"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Sri Sai Pranav", github = "SriSaiPranav07" }]
+keywords = ["churn", "mlops", "xgboost", "shap", "streamlit"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "F841",   # local variable is assigned to but never used (some legacy pages)
+]
+exclude = [
+    ".git",
+    "__pycache__",
+    "docs/",
+    "models/",
+    "data/",
+    ".venv",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

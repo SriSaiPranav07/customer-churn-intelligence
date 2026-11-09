@@ -1,10 +1,10 @@
 """Tests for retention action recommendation engine."""
-import pytest
 import pandas as pd
+
 from src.retention_recommender import (
-    generate_customer_recommendation,
     determine_recommendation_priority,
-    generate_batch_recommendations
+    generate_batch_recommendations,
+    generate_customer_recommendation,
 )
 
 
@@ -65,3 +65,28 @@ def test_batch_recommendations():
     assert "primary_action" in recs_df.columns
     assert recs_df.loc[0, "priority"] == "Critical"
     assert recs_df.loc[1, "priority"] == "Low"
+    assert "expected_retention_value" in recs_df.columns
+
+
+def test_expected_value_calculation_and_overrides():
+    customer = pd.Series({
+        "customerID": "EV-TEST",
+        "tenure": 12,
+        "MonthlyCharges": 70.0,
+        "Contract": "Month-to-month",
+        "PaymentMethod": "Electronic check",
+        "InternetService": "Fiber optic",
+        "TechSupport": "No"
+    })
+    # EV = P(churn) * acceptance_rate * annual_revenue - cost
+    # 0.50 * 0.50 * 1000.0 - 50.0 = 250.0 - 50.0 = 200.0
+    rec = generate_customer_recommendation(
+        customer,
+        churn_probability=0.50,
+        cost_override=50.0,
+        acceptance_rate=0.50,
+        annual_revenue_basis=1000.0
+    )
+    assert rec["estimated_cost"] == 50.0
+    assert rec["expected_retention_value"] == 200.0
+

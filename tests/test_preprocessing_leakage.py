@@ -1,13 +1,11 @@
 """Tests verifying zero data leakage in preprocessing and model pipelines."""
-import pytest
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 
 from src.data_loader import load_telco_data
 from src.data_validation import validate_raw_data
-from src.feature_engineering import prepare_features_and_target, NUMERICAL_FEATURES
+from src.feature_engineering import NUMERICAL_FEATURES, prepare_features_and_target
 from src.preprocessing import build_pipeline
 
 
@@ -51,9 +49,9 @@ def test_decision_threshold_not_tuned_on_test_set():
     Guarantees decision threshold is determined via CV on training set,
     independent of test set labels.
     """
-    from src.evaluation import find_optimal_threshold
     # Shuffling test labels should have no impact on the stored optimal threshold
     import json
+
     from src.utils import MODELS_DIR
 
     metrics_path = MODELS_DIR / "evaluation_metrics.json"

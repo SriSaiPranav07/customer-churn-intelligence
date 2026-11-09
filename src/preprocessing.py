@@ -1,16 +1,18 @@
 """Data preprocessing and feature transformation pipelines."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
+
 import joblib
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from src.feature_engineering import NUMERICAL_FEATURES, CATEGORICAL_FEATURES
+from src.feature_engineering import CATEGORICAL_FEATURES, NUMERICAL_FEATURES
 from src.utils import MODELS_DIR, logger
 
 PREPROCESSOR_PATH = MODELS_DIR / "preprocessor.joblib"

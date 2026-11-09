@@ -1,9 +1,11 @@
 """Explainable AI (XAI) using SHAP for global and local churn interpretation."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -12,7 +14,7 @@ from sklearn.pipeline import Pipeline
 
 from src.feature_engineering import prepare_features_and_target
 from src.predict import get_predictor
-from src.utils import logger, COLOR_HIGH_RISK, COLOR_LOW_RISK
+from src.utils import COLOR_HIGH_RISK, COLOR_LOW_RISK, logger
 
 CAUSATION_DISCLAIMER = (
     "Note on Interpretation: SHAP values quantify each feature's directional contribution "
@@ -27,7 +29,7 @@ def clean_feature_label(name: str) -> str:
     # Strip prefix like num__ or cat__
     if "__" in name:
         name = name.split("__", 1)[1]
-    
+
     # Clean standard categories
     name = name.replace("Contract_", "Contract: ")
     name = name.replace("PaymentMethod_", "Payment: ")

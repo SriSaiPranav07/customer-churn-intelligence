@@ -4,26 +4,36 @@ Single-customer dossier, local SHAP explainability, and personalized retention a
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import streamlit as st
-import pandas as pd
-import numpy as np
+import joblib
 import plotly.graph_objects as go
+import streamlit as st
 
 from src.data_loader import load_telco_data
-from src.predict import get_predictor
 from src.explainability import get_shap_explainer, plot_customer_shap_waterfall
+from src.predict import get_predictor
 from src.retention_recommender import generate_customer_recommendation
+from src.ui_components import inject_custom_css, render_footer, render_sidebar_filters
 from src.utils import (
-    format_currency, format_percentage, get_risk_badge_color,
-    ACTION_STATUS_OPTIONS, RISK_THRESHOLD_HIGH, RISK_THRESHOLD_MEDIUM
+    ACTION_STATUS_OPTIONS,
+    DEFAULT_ACCEPTANCE_RATE,
+    DEFAULT_ANNUAL_REVENUE_BASIS,
+    DEFAULT_INTERVENTION_COST,
+    MODELS_DIR,
+    format_currency,
+    get_risk_badge_color,
 )
-from src.ui_components import inject_custom_css, render_sidebar_filters, render_footer
 
 st.set_page_config(page_title="Customer Analysis | Churn Intelligence", page_icon="👤", layout="wide")
 inject_custom_css()
 high_thresh, med_thresh = render_sidebar_filters()
+
+# Retrieve illustrative retention parameters from session state if configured
+intervention_cost = st.session_state.get("sidebar_intervention_cost", DEFAULT_INTERVENTION_COST)
+acceptance_rate = st.session_state.get("sidebar_acceptance_rate", DEFAULT_ACCEPTANCE_RATE)
+annual_revenue_basis = st.session_state.get("sidebar_annual_revenue_basis", DEFAULT_ANNUAL_REVENUE_BASIS)
 
 st.title("👤 Individual Customer Dossier & Explainability")
 st.markdown("Detailed diagnostic of individual account health, underlying SHAP risk drivers, and customized retention workflows.")
@@ -32,11 +42,23 @@ st.markdown("Detailed diagnostic of individual account health, underlying SHAP r
 if "customer_actions" not in st.session_state:
     st.session_state.customer_actions = {}
 
-# Load data and predictor
+# Load data and predictor (preferring out-of-fold honest probabilities)
 @st.cache_data(show_spinner="Loading customer data...")
 def get_customer_pool():
+    cache_path = MODELS_DIR / "test_evaluation_cache.joblib"
+    if cache_path.exists():
+        try:
+            cache = joblib.load(cache_path)
+            if "oof_df" in cache and cache["oof_df"] is not None:
+                return cache["oof_df"].copy()
+        except Exception:
+            pass
+
     df, _ = load_telco_data()
     predictor = get_predictor()
+    if not predictor.is_ready():
+        st.error("⚠️ **Model artifacts are not loaded.** Please run `python -m src.train` to generate production model artifacts.")
+        st.stop()
     scored = predictor.predict(df, high_threshold=0.60, med_threshold=0.35)
     return scored
 
@@ -143,6 +165,8 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.subheader("🔬 SHAP Explainable AI: Individual Churn Drivers")
 st.markdown("Quantifying exactly which features pushed this customer's churn risk upward (red) or downward (green).")
 
+st.warning("⚠️ **SHAP indicates statistical association, not counterfactual causation**: Changing a feature may not alter churn risk unless underlying customer satisfaction and service economics change.")
+
 shap_left, shap_right = st.columns([1.3, 1])
 
 with shap_left:
@@ -159,12 +183,15 @@ with shap_right:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Intelligent Retention Recommendation Section
-st.subheader("💡 Intelligent Retention Action (Mentor Challenge)")
+st.subheader("💡 Intelligent Retention Action")
 
 rec = generate_customer_recommendation(
     customer_row,
     churn_probability=churn_prob,
-    shap_risk_drivers=explanation.get("risk_drivers", [])
+    shap_risk_drivers=explanation.get("risk_drivers", []),
+    cost_override=intervention_cost,
+    acceptance_rate=acceptance_rate,
+    annual_revenue_basis=annual_revenue_basis
 )
 
 # Fetch persisted action status if exists
@@ -189,9 +216,13 @@ with rec_box_left:
             <div style="background-color: #F8FAFC; border-left: 3px solid #2563EB; padding: 0.75rem 1rem; border-radius: 4px; font-size: 0.9rem; color: #475569; margin-bottom: 1rem;">
                 <b>Business Rationale:</b> {rec['rationale']}
             </div>
-            <div style="display: flex; gap: 2.5rem; font-size: 0.9rem;">
-                <div>Estimated Intervention Cost: <b style="color: #0F172A;">{format_currency(rec['estimated_cost'])}</b></div>
-                <div>Estimated Revenue Protected: <b style="color: #10B981;">{format_currency(rec['revenue_protected'])}</b></div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; font-size: 0.9rem; border-top: 1px solid #E2E8F0; padding-top: 0.75rem;">
+                <div>Est. Intervention Cost: <b style="color: #0F172A;">{format_currency(rec['estimated_cost'])}</b></div>
+                <div>Protected ARR: <b style="color: #10B981;">{format_currency(rec['revenue_protected'])}</b></div>
+                <div>Expected Net Value (EV): <b style="color: {'#10B981' if rec['expected_retention_value'] >= 0 else '#EF4444'};">{format_currency(rec['expected_retention_value'])}</b></div>
+            </div>
+            <div style="font-size: 0.75rem; color: #64748B; margin-top: 0.5rem;">
+                *Illustrative model: EV = P(churn) × acceptance rate ({acceptance_rate*100:.0f}%) × ARR basis ({format_currency(annual_revenue_basis)}) - Cost ({format_currency(rec['estimated_cost'])}).
             </div>
         </div>
     """, unsafe_allow_html=True)

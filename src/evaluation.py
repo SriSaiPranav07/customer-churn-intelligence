@@ -1,18 +1,26 @@
 """Evaluation metrics calculation, statistical uncertainty, fairness, and Plotly visualization charts."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, average_precision_score, confusion_matrix,
-    roc_curve, precision_recall_curve, brier_score_loss
+    accuracy_score,
+    average_precision_score,
+    brier_score_loss,
+    confusion_matrix,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
 )
 
 

@@ -1,5 +1,4 @@
 """Data loading, acquisition, and synthetic fallback generation."""
-import os
 import sys
 from pathlib import Path
 
@@ -7,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import urllib.request
-from typing import Tuple, Dict, Any
+from typing import Any, Dict, Tuple
+
 import numpy as np
 import pandas as pd
 
@@ -51,7 +51,7 @@ def generate_realistic_synthetic_telco_data(n_samples: int = 7043, random_state:
     senior_citizen = rng.choice([0, 1], size=n_samples, p=[0.84, 0.16])
     partner = rng.choice(["Yes", "No"], size=n_samples, p=[0.48, 0.52])
     dependents = np.where(partner == "Yes", rng.choice(["Yes", "No"], size=n_samples, p=[0.55, 0.45]), "No")
-    
+
     # Tenure follows a bimodal distribution: many new (<12m) and many long-term (>60m)
     tenure_raw = np.concatenate([
         rng.integers(1, 15, size=int(n_samples * 0.4)),

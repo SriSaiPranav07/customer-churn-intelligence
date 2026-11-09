@@ -1,24 +1,36 @@
-"""Page 4: Retention Action Center (Mentor Challenge).
+"""Page 4: Retention Action Center.
 
 Prioritized customer intervention queue, status tracking, and exportable retention action plan.
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import joblib
 import streamlit as st
-import pandas as pd
-import numpy as np
 
 from src.data_loader import load_telco_data
 from src.predict import get_predictor
-from src.retention_recommender import generate_batch_recommendations, RETENTION_DISCLAIMER
-from src.utils import format_currency, format_percentage, ACTION_STATUS_OPTIONS
-from src.ui_components import inject_custom_css, render_metric_card, render_sidebar_filters, render_footer
+from src.retention_recommender import RETENTION_DISCLAIMER, generate_batch_recommendations
+from src.ui_components import inject_custom_css, render_footer, render_metric_card, render_sidebar_filters
+from src.utils import (
+    ACTION_STATUS_OPTIONS,
+    DEFAULT_ACCEPTANCE_RATE,
+    DEFAULT_ANNUAL_REVENUE_BASIS,
+    DEFAULT_INTERVENTION_COST,
+    MODELS_DIR,
+    format_currency,
+)
 
 st.set_page_config(page_title="Retention Action Center | Churn Intelligence", page_icon="🎯", layout="wide")
 inject_custom_css()
 high_thresh, med_thresh = render_sidebar_filters()
+
+# Retrieve illustrative retention parameters from session state if configured
+intervention_cost = st.session_state.get("sidebar_intervention_cost", DEFAULT_INTERVENTION_COST)
+acceptance_rate = st.session_state.get("sidebar_acceptance_rate", DEFAULT_ACCEPTANCE_RATE)
+annual_revenue_basis = st.session_state.get("sidebar_annual_revenue_basis", DEFAULT_ANNUAL_REVENUE_BASIS)
 
 st.title("🎯 Retention Action Center")
 st.markdown("Prioritized operational intervention queue for customer success and retention specialists.")
@@ -29,14 +41,34 @@ if "customer_actions" not in st.session_state:
 
 # Load and batch recommend
 @st.cache_data(show_spinner="Generating prioritized retention queue...")
-def get_action_queue():
-    df, _ = load_telco_data()
-    predictor = get_predictor()
-    scored = predictor.predict(df, high_threshold=0.60, med_threshold=0.35)
-    recs = generate_batch_recommendations(scored)
+def get_action_queue(cost, acc_rate, rev_basis):
+    cache_path = MODELS_DIR / "test_evaluation_cache.joblib"
+    scored = None
+    if cache_path.exists():
+        try:
+            cache = joblib.load(cache_path)
+            if "oof_df" in cache and cache["oof_df"] is not None:
+                scored = cache["oof_df"].copy()
+        except Exception:
+            scored = None
+
+    if scored is None:
+        df, _ = load_telco_data()
+        predictor = get_predictor()
+        if not predictor.is_ready():
+            st.error("⚠️ **Model artifacts are not loaded.** Please run `python -m src.train` to generate production model artifacts.")
+            st.stop()
+        scored = predictor.predict(df, high_threshold=0.60, med_threshold=0.35)
+
+    recs = generate_batch_recommendations(
+        scored,
+        cost_override=cost,
+        acceptance_rate=acc_rate,
+        annual_revenue_basis=rev_basis
+    )
     return recs
 
-action_df = get_action_queue().copy()
+action_df = get_action_queue(intervention_cost, acceptance_rate, annual_revenue_basis).copy()
 
 # Dynamically apply current user sidebar thresholds
 action_df["risk_category"] = [
@@ -54,8 +86,9 @@ for i, row in action_df.iterrows():
 total_in_queue = len(action_df)
 critical_count = (action_df["priority"] == "Critical").sum()
 high_count = (action_df["priority"] == "High").sum()
-total_budget = action_df["estimated_cost"].sum()
-total_rev_protected = action_df["revenue_protected"].sum()
+total_budget = float(action_df["estimated_cost"].sum())
+total_rev_protected = float(action_df["revenue_protected"].sum())
+total_expected_value = float(action_df["expected_retention_value"].sum())
 
 m1, m2, m3, m4 = st.columns(4)
 with m1:
@@ -63,9 +96,9 @@ with m1:
 with m2:
     render_metric_card("Critical & High Priority", f"{critical_count + high_count:,}", f"Critical: {critical_count:,} | High: {high_count:,}")
 with m3:
-    render_metric_card("Est. Intervention Budget", format_currency(total_budget), "Total cost to execute all plans")
+    render_metric_card("Est. Intervention Budget", format_currency(total_budget), f"Cost basis: {format_currency(intervention_cost)}/intervention")
 with m4:
-    render_metric_card("Protected Annual ARR", format_currency(total_rev_protected), f"Projected ROI: {total_rev_protected / max(total_budget, 1):.1f}x")
+    render_metric_card("Expected Net Value (EV)", format_currency(total_expected_value), f"Protected ARR: {format_currency(total_rev_protected)}")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -106,11 +139,12 @@ st.markdown(f"**Showing {len(filtered_queue):,} actionable cases** in current re
 # Table View
 display_queue = filtered_queue[[
     "customerID", "priority", "churn_probability", "action_status",
-    "primary_strategy", "primary_action", "rationale",
+    "primary_strategy", "primary_action", "expected_retention_value",
     "estimated_cost", "revenue_protected", "Contract", "MonthlyCharges"
 ]].copy()
 
 display_queue["churn_probability"] = display_queue["churn_probability"].apply(lambda p: f"{p*100:.1f}%")
+display_queue["expected_retention_value"] = display_queue["expected_retention_value"].apply(format_currency)
 display_queue["estimated_cost"] = display_queue["estimated_cost"].apply(format_currency)
 display_queue["revenue_protected"] = display_queue["revenue_protected"].apply(format_currency)
 display_queue["MonthlyCharges"] = display_queue["MonthlyCharges"].apply(format_currency)
@@ -137,7 +171,7 @@ st.download_button(
 
 st.markdown(f"""
     <div class="callout-box" style="margin-top: 1.5rem;">
-        <b>Decision-Support Guardrail:</b><br>
+        <b>Illustrative Retention Economics Guardrail:</b><br>
         {RETENTION_DISCLAIMER}
     </div>
 """, unsafe_allow_html=True)

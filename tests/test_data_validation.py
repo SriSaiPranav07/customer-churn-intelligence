@@ -1,7 +1,8 @@
 """Tests for data validation and schema integrity."""
-import pytest
 import pandas as pd
-from src.data_validation import validate_raw_data, clean_total_charges, EXPECTED_RAW_COLUMNS
+import pytest
+
+from src.data_validation import clean_total_charges, validate_raw_data
 
 
 @pytest.fixture

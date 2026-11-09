@@ -1,6 +1,6 @@
-"""Utility functions, configuration constants, and formatting helpers."""
-from pathlib import Path
+"""Utility functions, configuration constants, business assumptions, and formatting helpers."""
 import logging
+from pathlib import Path
 
 # Set up logging
 logging.basicConfig(
@@ -16,10 +16,14 @@ MODELS_DIR = BASE_DIR / "models"
 DOCS_DIR = BASE_DIR / "docs"
 
 # Risk Threshold Constants
-# Calibrated for business retention operations
 RISK_THRESHOLD_HIGH = 0.60
 RISK_THRESHOLD_MEDIUM = 0.35
-OPTIMAL_DECISION_THRESHOLD = 0.42
+OPTIMAL_DECISION_THRESHOLD = 0.54
+
+# Illustrative Retention Economics Assumptions
+DEFAULT_INTERVENTION_COST = 25.0       # USD per targeted intervention
+DEFAULT_ACCEPTANCE_RATE = 0.40         # 40% offer acceptance probability
+DEFAULT_ANNUAL_REVENUE_BASIS = 600.0   # USD estimated annual revenue per subscriber
 
 # Action Statuses
 ACTION_STATUS_OPTIONS = [
@@ -37,6 +41,20 @@ COLOR_MEDIUM_RISK = "#F59E0B"   # Amber/Orange
 COLOR_LOW_RISK = "#10B981"      # Green
 COLOR_PRIMARY = "#2563EB"       # Modern Blue
 COLOR_SECONDARY = "#64748B"     # Slate Gray
+
+
+def compute_expected_retention_value(
+    churn_probability: float,
+    acceptance_rate: float = DEFAULT_ACCEPTANCE_RATE,
+    annual_revenue: float = DEFAULT_ANNUAL_REVENUE_BASIS,
+    intervention_cost: float = DEFAULT_INTERVENTION_COST
+) -> float:
+    """
+    Computes expected net value of retention outreach:
+    Expected Value = P(churn) * acceptance_rate * annual_revenue - intervention_cost
+    """
+    ev = (churn_probability * acceptance_rate * annual_revenue) - intervention_cost
+    return round(float(ev), 2)
 
 
 def get_risk_category(prob: float, high_thresh: float = RISK_THRESHOLD_HIGH, med_thresh: float = RISK_THRESHOLD_MEDIUM) -> str:

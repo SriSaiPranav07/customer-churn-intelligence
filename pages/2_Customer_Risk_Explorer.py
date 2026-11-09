@@ -4,17 +4,16 @@ Portfolio roster exploration, multi-criteria filtering, and priority customer ex
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import joblib
 import streamlit as st
-import pandas as pd
-import numpy as np
 
 from src.data_loader import load_telco_data
 from src.predict import get_predictor
-from src.retention_recommender import generate_customer_recommendation
-from src.utils import format_currency, format_percentage
-from src.ui_components import inject_custom_css, render_sidebar_filters, render_footer
+from src.ui_components import inject_custom_css, render_footer, render_sidebar_filters
+from src.utils import MODELS_DIR, format_currency
 
 st.set_page_config(page_title="Customer Risk Explorer | Churn Intelligence", page_icon="🔍", layout="wide")
 inject_custom_css()
@@ -23,11 +22,23 @@ high_thresh, med_thresh = render_sidebar_filters()
 st.title("🔍 Customer Risk Explorer")
 st.markdown("Search, filter, and inspect customer churn risk rankings across contract structures, tenure, and subscription tiers.")
 
-# Load data and run predictions
+# Load data and run predictions (preferring out-of-fold honest probabilities)
 @st.cache_data(show_spinner="Loading customer portfolio...")
 def get_explorer_data():
+    cache_path = MODELS_DIR / "test_evaluation_cache.joblib"
+    if cache_path.exists():
+        try:
+            cache = joblib.load(cache_path)
+            if "oof_df" in cache and cache["oof_df"] is not None:
+                return cache["oof_df"].copy()
+        except Exception:
+            pass
+
     df, _ = load_telco_data()
     predictor = get_predictor()
+    if not predictor.is_ready():
+        st.error("⚠️ **Model artifacts are not loaded.** Please run `python -m src.train` to generate production model artifacts.")
+        st.stop()
     scored = predictor.predict(df, high_threshold=0.60, med_threshold=0.35)
     return scored
 

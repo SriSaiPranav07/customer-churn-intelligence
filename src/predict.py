@@ -1,10 +1,12 @@
 """Inference engine for customer churn prediction."""
-from datetime import datetime, timezone
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from typing import Optional
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -12,11 +14,8 @@ from sklearn.pipeline import Pipeline
 
 from src.data_validation import validate_raw_data
 from src.feature_engineering import prepare_features_and_target
-from src.preprocessing import load_preprocessor, get_feature_names
-from src.utils import (
-    MODELS_DIR, get_risk_category,
-    RISK_THRESHOLD_HIGH, RISK_THRESHOLD_MEDIUM, logger
-)
+from src.preprocessing import get_feature_names, load_preprocessor
+from src.utils import MODELS_DIR, RISK_THRESHOLD_HIGH, RISK_THRESHOLD_MEDIUM, get_risk_category, logger
 
 CHAMPION_MODEL_PATH = MODELS_DIR / "champion_model.joblib"
 

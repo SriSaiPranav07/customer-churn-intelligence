@@ -1,6 +1,7 @@
 """Tests for feature engineering transformations."""
-import pytest
 import pandas as pd
+import pytest
+
 from src.feature_engineering import engineer_features, prepare_features_and_target
 
 

@@ -1,8 +1,8 @@
 """Tests for model prediction pipeline and risk classification."""
 import pytest
-import pandas as pd
-from src.predict import get_predictor
+
 from src.data_loader import load_telco_data
+from src.predict import get_predictor
 
 
 @pytest.fixture(scope="module")
@@ -45,3 +45,10 @@ def test_risk_category_assignment(predictor):
             assert cat == "Medium Risk"
         else:
             assert cat == "Low Risk"
+
+
+def test_predictor_load_method(predictor):
+    res = predictor.load()
+    assert res is predictor
+    assert predictor.is_ready()
+

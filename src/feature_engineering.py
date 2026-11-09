@@ -1,12 +1,13 @@
 """Feature engineering pipeline for churn prediction."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from src.utils import logger
 
 NUMERICAL_FEATURES = [
     "tenure",
@@ -67,7 +68,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         "PhoneService", "MultipleLines", "OnlineSecurity", "OnlineBackup",
         "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies"
     ]
-    
+
     num_services = np.zeros(len(df), dtype=int)
     for col in service_cols:
         if col in df.columns:
@@ -139,7 +140,7 @@ def prepare_features_and_target(
         customer_ids: Customer ID series for business identification
     """
     df_engineered = engineer_features(df)
-    
+
     # Extract IDs
     if "customerID" in df_engineered.columns:
         customer_ids = df_engineered["customerID"]
@@ -153,8 +154,7 @@ def prepare_features_and_target(
         y = df_engineered["Churn"].map({
             "Yes": 1, "No": 0,
             1: 1, 0: 0,
-            "1": 1, "0": 0,
-            True: 1, False: 0
+            "1": 1, "0": 0
         }).astype(int)
 
     # Select only valid features

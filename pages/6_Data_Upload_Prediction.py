@@ -4,18 +4,17 @@ CSV upload interface, schema validation, batch inference, and results export.
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import io
-import streamlit as st
 import pandas as pd
-import numpy as np
+import streamlit as st
 
-from src.utils import DATA_DIR, format_currency
 from src.data_validation import validate_uploaded_csv
 from src.predict import get_predictor
 from src.retention_recommender import generate_batch_recommendations
-from src.ui_components import inject_custom_css, render_sidebar_filters, render_footer
+from src.ui_components import inject_custom_css, render_footer, render_sidebar_filters
+from src.utils import DATA_DIR, format_currency
 
 st.set_page_config(page_title="Batch Data Upload | Churn Intelligence", page_icon="📂", layout="wide")
 inject_custom_css()
@@ -69,6 +68,9 @@ if uploaded_file is not None:
         if st.button("⚡ Run Live Churn Scoring & Retention Recommender", type="primary", use_container_width=True):
             with st.spinner("Executing feature engineering and model inference..."):
                 predictor = get_predictor()
+                if not predictor.is_ready():
+                    st.error("⚠️ **Model artifacts are not loaded.** Please run `python -m src.train` to generate production model artifacts.")
+                    st.stop()
                 scored_df = predictor.predict(cleaned_df, high_threshold=high_thresh, med_threshold=med_thresh)
                 recs_df = generate_batch_recommendations(scored_df)
 
@@ -94,11 +96,12 @@ if uploaded_file is not None:
             st.markdown("### 📋 Prediction Results & Recommended Actions")
             view_cols = [
                 "customerID", "risk_category", "churn_probability", "priority",
-                "primary_strategy", "primary_action", "estimated_cost", "revenue_protected",
-                "Contract", "MonthlyCharges", "tenure"
+                "primary_strategy", "primary_action", "expected_retention_value",
+                "estimated_cost", "revenue_protected", "Contract", "MonthlyCharges", "tenure"
             ]
             display_res = recs_df[view_cols].copy()
             display_res["churn_probability"] = display_res["churn_probability"].apply(lambda p: f"{p*100:.1f}%")
+            display_res["expected_retention_value"] = display_res["expected_retention_value"].apply(format_currency)
             display_res["estimated_cost"] = display_res["estimated_cost"].apply(format_currency)
             display_res["revenue_protected"] = display_res["revenue_protected"].apply(format_currency)
             display_res["MonthlyCharges"] = display_res["MonthlyCharges"].apply(format_currency)

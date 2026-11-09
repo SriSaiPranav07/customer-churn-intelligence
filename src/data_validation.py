@@ -1,12 +1,13 @@
 """Data validation schemas, range checks, and integrity enforcement."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from typing import Tuple, List, Dict, Any
+from typing import List, Tuple
+
 import numpy as np
 import pandas as pd
-from src.utils import logger
 
 # Expected columns for full training dataset
 EXPECTED_RAW_COLUMNS = [
