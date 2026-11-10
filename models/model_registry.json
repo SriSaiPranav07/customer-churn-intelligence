@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "registry": [
+    {
+      "model_id": "churn-xgb-v1.0.0",
+      "model_name": "XGBoost",
+      "version": "1.0.0",
+      "stage": "Production",
+      "artifact_path": "models/champion_model.joblib",
+      "training_date": "2026-11-09",
+      "training_script": "src/train.py",
+      "dataset_source": "IBM Telco Customer Churn (Kaggle/IBM Watson)",
+      "dataset_records": 7043,
+      "train_records": 5634,
+      "test_records": 1409,
+      "train_churn_rate": 0.2654,
+      "test_churn_rate": 0.2654,
+      "champion_rationale": "Cross-validation demonstrated that XGBoost (ROC-AUC 0.8487 \u00b1 0.0110) and Random Forest (ROC-AUC 0.8470) are statistically comparable within 1 standard deviation margin. XGBoost was selected as production champion based on superior balance of recall, precision, and probability calibration.",
+      "optimal_threshold_cv": 0.54,
+      "calibration_method": "Isotonic Regression",
+      "cv_folds": 5,
+      "cv_roc_auc_mean": 0.8487,
+      "cv_roc_auc_std": 0.011,
+      "test_roc_auc": 0.8449,
+      "test_pr_auc": 0.655,
+      "test_f1": 0.6246,
+      "test_recall": 0.7647,
+      "test_precision": 0.5261,
+      "test_brier_score": 0.1495,
+      "environment": {
+        "python": "3.11.9",
+        "scikit_learn": "1.5.2",
+        "xgboost": "3.2.0",
+        "shap": "0.51.0",
+        "pandas": "2.2.3",
+        "numpy": "2.1.2"
+      },
+      "hyperparameters": {
+        "n_estimators": 300,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "scale_pos_weight": 2.77,
+        "use_label_encoder": false,
+        "eval_metric": "logloss",
+        "random_state": 42
+      },
+      "preprocessing": {
+        "numerical_features": ["tenure", "MonthlyCharges", "TotalCharges", "num_services", "charges_ratio", "monthly_to_total_ratio", "cost_per_service"],
+        "categorical_features": ["gender", "SeniorCitizen", "Partner", "Dependents", "PhoneService", "MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod", "tenure_group"],
+        "numerical_transformer": "StandardScaler",
+        "categorical_transformer": "OneHotEncoder(handle_unknown=ignore)",
+        "pipeline": "sklearn.pipeline.Pipeline"
+      },
+      "leakage_controls": [
+        "80/20 stratified train/test split applied before any preprocessing",
+        "All scalers and encoders fit on training split only via Pipeline",
+        "Threshold optimization performed on cross-validation folds only",
+        "Final test set evaluated exactly once"
+      ],
+      "fairness_audit": {
+        "gender_ablation_delta_roc_auc": -0.001,
+        "conclusion": "Gender feature removal has negligible impact on model performance, confirming it is not a primary driver."
+      },
+      "limitations": [
+        "Dataset is a static cross-sectional snapshot with no timestamps — no true 30-day forward prediction",
+        "SHAP attributions reflect statistical associations, not causal relationships",
+        "Intervention cost assumptions are illustrative defaults requiring business calibration",
+        "No online learning or concept drift correction implemented yet"
+      ]
+    }
+  ]
+}
